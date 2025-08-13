@@ -22,6 +22,16 @@ class SignalGenerator:
         """Initialize the signal generator."""
         self.mt5 = mt5_connector
         self.config = config
+        # Initialize volume analyzer for enhanced signals
+        try:
+            from volume_analyzer import VolumeAnalyzer
+            self.volume_analyzer = VolumeAnalyzer(mt5_connector)
+            self.volume_enabled = True
+            print(f"{Fore.GREEN}✅ Volume analysis enabled{Style.RESET_ALL}")
+        except ImportError:
+            self.volume_analyzer = None
+            self.volume_enabled = False
+            print(f"{Fore.YELLOW}⚠️ Volume analyzer not available{Style.RESET_ALL}")
         
     def generate_live_day_trading_signal(self, symbol):
         """
@@ -71,8 +81,14 @@ class SignalGenerator:
             # Combine analysis with day trading focus
             signal_data = self._combine_day_trading_analysis(symbol, m5_analysis, m15_analysis, h1_analysis, h4_analysis)
             
+            # Enhance with volume analysis if available
+            if signal_data and self.volume_enabled:
+                signal_data = self._enhance_with_volume_analysis(symbol, signal_data)
+            
             if signal_data:
                 print(f"✅ Day trading signal generated for {symbol}: {signal_data['signal']} {signal_data['strength']:.1f}/10")
+                if 'volume_score' in signal_data:
+                    print(f"🔊 Volume Score: {signal_data['volume_score']:.1f}/10")
             else:
                 print(f"⚠️ No qualifying day trading signal for {symbol}")
             
@@ -663,6 +679,103 @@ class SignalGenerator:
             resistance = current_price * 1.01
             
         return support, resistance
+    
+    def _enhance_with_volume_analysis(self, symbol, signal_data):
+        """
+        Enhance signal with volume analysis for contrarian confirmation.
+        
+        Args:
+            symbol (str): Currency pair
+            signal_data (dict): Original signal data
+            
+        Returns:
+            dict: Enhanced signal data with volume analysis
+        """
+        try:
+            if not self.volume_analyzer:
+                return signal_data
+            
+            # Get volume analysis for multiple timeframes
+            volume_analysis = self.volume_analyzer.get_volume_contrarian_signals(
+                symbol, ['M5', 'M15', 'H1']
+            )
+            
+            if not volume_analysis or 'combined_analysis' not in volume_analysis:
+                return signal_data
+            
+            combined_volume = volume_analysis['combined_analysis']
+            volume_score = combined_volume['score']
+            
+            # Apply volume boost to signal strength
+            original_strength = signal_data['strength']
+            volume_boost = 0
+            
+            # Volume pattern bonuses for contrarian signals
+            if volume_score >= 8.0:
+                volume_boost = 1.5  # Strong volume confirmation
+                signal_data['confluences'].append("Strong Volume Confirmation")
+            elif volume_score >= 6.5:
+                volume_boost = 1.0  # Moderate volume support
+                signal_data['confluences'].append("Volume Support")
+            elif volume_score >= 5.0:
+                volume_boost = 0.5  # Neutral volume
+            else:
+                volume_boost = -1.0  # Volume against signal
+                signal_data['confluences'].append("Volume Warning")
+            
+            # Check for specific volume patterns
+            for tf in ['M5', 'M15', 'H1']:
+                if tf in volume_analysis:
+                    tf_analysis = volume_analysis[tf]
+                    
+                    # Volume spike bonus (exhaustion signal)
+                    if tf_analysis.get('volume_spike', False):
+                        volume_boost += 0.5
+                        signal_data['confluences'].append(f"{tf} Volume Spike")
+                    
+                    # Price-volume divergence
+                    if tf_analysis.get('price_volume_divergence', {}).get('detected', False):
+                        divergence_type = tf_analysis['price_volume_divergence']['type']
+                        if 'bearish' in divergence_type and signal_data['signal'] == 'BUY':
+                            volume_boost += 1.0  # Bearish divergence supports contrarian BUY
+                            signal_data['confluences'].append(f"{tf} Bearish Volume Divergence")
+                        elif 'bullish' in divergence_type and signal_data['signal'] == 'SELL':
+                            volume_boost += 1.0  # Bullish divergence supports contrarian SELL
+                            signal_data['confluences'].append(f"{tf} Bullish Volume Divergence")
+                    
+                    # Exhaustion patterns
+                    if tf_analysis.get('exhaustion_signal', {}).get('detected', False):
+                        exhaustion_type = tf_analysis['exhaustion_signal']['type']
+                        if 'buying_exhaustion' in exhaustion_type and signal_data['signal'] == 'BUY':
+                            volume_boost += 1.5  # Buying exhaustion supports contrarian BUY (which becomes SELL)
+                            signal_data['confluences'].append(f"{tf} Buying Exhaustion")
+                        elif 'selling_exhaustion' in exhaustion_type and signal_data['signal'] == 'SELL':
+                            volume_boost += 1.5  # Selling exhaustion supports contrarian SELL (which becomes BUY)
+                            signal_data['confluences'].append(f"{tf} Selling Exhaustion")
+            
+            # Apply volume enhancement
+            enhanced_strength = min(10.0, original_strength + volume_boost)
+            
+            # Add volume data to signal
+            signal_data['strength'] = enhanced_strength
+            signal_data['volume_score'] = volume_score
+            signal_data['volume_boost'] = volume_boost
+            signal_data['volume_analysis'] = volume_analysis
+            signal_data['volume_recommendation'] = combined_volume.get('recommendation', {})
+            
+            # Volume-based filtering
+            if volume_score < 3.0 and enhanced_strength < 8.0:
+                # Poor volume pattern - downgrade signal significantly
+                print(f"⚠️ Volume analysis suggests avoiding {symbol} (Volume Score: {volume_score:.1f})")
+                return None
+            
+            print(f"🔊 Volume enhancement: {original_strength:.1f} → {enhanced_strength:.1f} (+{volume_boost:.1f})")
+            
+            return signal_data
+            
+        except Exception as e:
+            print(f"❌ Volume enhancement error for {symbol}: {e}")
+            return signal_data
 
 
 def main():

@@ -273,6 +273,36 @@ Contrarian Trading System is ready to send notifications."""
 🎯 <b>Status:</b> PARTIAL PROFIT TAKEN"""
 
         return self.send_message(message)
+    
+    def send_volume_trade_notification(self, symbol, action, entry_price, levels, signal_strength, volume_score, confluences):
+        """Send volume-based trade notification."""
+        if not self.enabled:
+            return False
+        
+        confluences_text = "\n".join([f"• {conf}" for conf in confluences[:8]])  # Show top 8
+        
+        message = f"""🚀 <b>HIGH VOLUME TRADE EXECUTED</b>
+
+📊 <b>Pair:</b> {symbol}
+🎯 <b>Action:</b> {action}
+💰 <b>Entry:</b> {entry_price:.5f}
+📈 <b>Volume Score:</b> {volume_score:.1f}/10 (HIGH)
+⭐ <b>Signal Strength:</b> {signal_strength:.1f}/10
+
+🛑 <b>Stop Loss:</b> {levels['sl']:.5f}
+🎯 <b>TP1:</b> {levels['tp1']:.5f}
+🎯 <b>TP2:</b> {levels['tp2']:.5f}
+🎯 <b>TP3:</b> {levels['tp3']:.5f}
+
+📊 <b>Volume Multiplier:</b> {levels['volume_multiplier']:.2f}x
+
+🔗 <b>Confluences:</b>
+{confluences_text}
+
+⏰ <b>Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} UTC
+💡 <b>Strategy:</b> Volume-Based Direct Execution"""
+
+        return self.send_message(message)
 
 
 def main():

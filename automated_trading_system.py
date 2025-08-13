@@ -260,6 +260,82 @@ class ContriarianTradingSystem:
         else:
             return signal
             
+    def _calculate_volume_based_levels(self, symbol, action, entry_price, atr_value, signal_strength=7.0, volume_score=8.0):
+        """
+        Calculate optimized TP/SL levels for volume-based trading.
+        
+        Args:
+            symbol (str): Trading symbol
+            action (str): Trade action (BUY or SELL) - NO REVERSAL
+            entry_price (float): Entry price
+            atr_value (float): ATR value
+            signal_strength (float): Signal strength (affects target distances)
+            volume_score (float): Volume analysis score (affects confidence)
+            
+        Returns:
+            dict: Optimized TP/SL levels for volume-based trading
+        """
+        # Get pip value for the symbol
+        pip_value = self._get_pip_value(symbol)
+        
+        if self.config.USE_FIXED_PIPS:
+            # Use fixed pip targets optimized for volume trading
+            sl_distance = self.config.FIXED_SL_PIPS * pip_value
+            tp1_distance = self.config.FIXED_TP_PIPS * pip_value
+            tp2_distance = (self.config.FIXED_TP_PIPS * 2) * pip_value
+            tp3_distance = (self.config.FIXED_TP_PIPS * 3) * pip_value
+            
+            # Volume confidence multiplier (higher volume = more aggressive targets)
+            volume_multiplier = min(1.5, volume_score / 8.0)  # 1.0 to 1.5x based on volume
+            strength_multiplier = self._get_strength_multiplier(signal_strength)
+            
+            # Apply multipliers to TP levels only
+            tp1_distance *= volume_multiplier * strength_multiplier
+            tp2_distance *= volume_multiplier * strength_multiplier  
+            tp3_distance *= volume_multiplier * strength_multiplier
+            
+        else:
+            # ATR-based system with volume enhancement
+            volume_multiplier = min(1.5, volume_score / 8.0)
+            strength_multiplier = self._get_strength_multiplier(signal_strength)
+            
+            base_sl_distance = atr_value * self.config.SL_ATR_MULTIPLIER
+            base_tp1_distance = atr_value * self.config.TP1_ATR_MULTIPLIER
+            base_tp2_distance = atr_value * self.config.TP2_ATR_MULTIPLIER
+            base_tp3_distance = atr_value * self.config.TP3_ATR_MULTIPLIER
+            
+            final_multiplier = volume_multiplier * strength_multiplier
+            
+            sl_distance = base_sl_distance
+            tp1_distance = base_tp1_distance * final_multiplier
+            tp2_distance = base_tp2_distance * final_multiplier
+            tp3_distance = base_tp3_distance * final_multiplier
+        
+        if action == "BUY":
+            # For BUY: SL below, TPs above
+            sl_price = entry_price - sl_distance
+            tp1_price = entry_price + tp1_distance
+            tp2_price = entry_price + tp2_distance
+            tp3_price = entry_price + tp3_distance
+        else:  # SELL
+            # For SELL: SL above, TPs below
+            sl_price = entry_price + sl_distance
+            tp1_price = entry_price - tp1_distance
+            tp2_price = entry_price - tp2_distance
+            tp3_price = entry_price - tp3_distance
+        
+        return {
+            'sl': sl_price,
+            'tp1': tp1_price,
+            'tp2': tp2_price,
+            'tp3': tp3_price,
+            'sl_distance_pips': sl_distance / pip_value,
+            'tp1_distance_pips': tp1_distance / pip_value,
+            'volume_multiplier': volume_multiplier,
+            'strength_multiplier': strength_multiplier,
+            'final_multiplier': volume_multiplier * strength_multiplier
+        }
+
     def _calculate_contrarian_levels(self, symbol, reversed_action, entry_price, atr_value, signal_strength=7.0):
         """
         Calculate optimized TP/SL levels for day trading contrarian trades.
@@ -678,24 +754,55 @@ class ContriarianTradingSystem:
             
         return False
     
-    def _execute_contrarian_trade(self, symbol, original_signal, signal_strength, confluences):
+    def _execute_volume_based_trade(self, symbol, signal_data):
         """
-        Execute contrarian trade by reversing the signal.
+        Execute trade based on volume analysis - NO REVERSAL needed.
+        Only trades when volume confirms the signal direction.
         
         Args:
             symbol (str): Trading symbol
-            original_signal (str): Original signal before reversal
-            signal_strength (float): Signal strength (0-10)
-            confluences (list): List of signal confluences
+            signal_data (dict): Signal data with volume analysis
         """
-        # Reverse the signal for contrarian trading
-        reversed_action = self._reverse_signal(original_signal)
+        original_signal = signal_data['signal']
+        signal_strength = signal_data['strength']
+        confluences = signal_data['confluences']
         
-        print(f"\n{Fore.MAGENTA}🔄 CONTRARIAN SIGNAL REVERSAL{Style.RESET_ALL}")
+        # Check if we have volume analysis
+        if 'volume_analysis' not in signal_data:
+            print(f"{Fore.YELLOW}⚠️ No volume analysis available for {symbol} - SKIPPING{Style.RESET_ALL}")
+            return False
+            
+        volume_analysis = signal_data['volume_analysis']
+        volume_score = volume_analysis.get('combined_analysis', {}).get('score', 0)
+        
+        # ONLY TRADE ON HIGH VOLUME CONFIRMATION
+        if volume_score < 8.0:
+            print(f"{Fore.YELLOW}📊 {symbol}: Volume score {volume_score:.1f}/10 - TOO LOW, SKIPPING{Style.RESET_ALL}")
+            print(f"💡 Waiting for volume score ≥ 8.0 for high-confidence trades")
+            return False
+        
+        # High volume confirmed - use signal AS IS (no reversal)
+        action = original_signal  # Direct execution, no reversal!
+        
+        print(f"\n{Fore.CYAN}� HIGH VOLUME SIGNAL CONFIRMED{Style.RESET_ALL}")
         print(f"📊 Symbol: {symbol}")
-        print(f"🔄 Original Signal: {Fore.BLUE}{original_signal}{Style.RESET_ALL}")
-        print(f"🎯 Contrarian Action: {Fore.GREEN if reversed_action == 'BUY' else Fore.RED}{reversed_action}{Style.RESET_ALL}")
-        print(f"⭐ Strength: {signal_strength}/10")
+        print(f"� Volume Score: {Fore.GREEN}{volume_score:.1f}/10{Style.RESET_ALL} (HIGH CONFIDENCE)")
+        print(f"🎯 Direct Action: {Fore.GREEN if action == 'BUY' else Fore.RED}{action}{Style.RESET_ALL}")
+        print(f"⭐ Signal Strength: {signal_strength}/10")
+        
+        # Display volume patterns detected
+        if 'timeframe_analysis' in volume_analysis:
+            patterns = []
+            for tf, data in volume_analysis['timeframe_analysis'].items():
+                if data.get('price_volume_divergence', {}).get('detected', False):
+                    div_type = data['price_volume_divergence']['type']
+                    patterns.append(f"{tf} {div_type}")
+                if data.get('exhaustion_signal', {}).get('detected', False):
+                    exh_type = data['exhaustion_signal']['type']
+                    patterns.append(f"{tf} {exh_type}")
+            
+            if patterns:
+                print(f"📋 Volume Patterns: {', '.join(patterns)}")
         
         # Get current market price
         tick = self.mt5.get_tick(symbol)
@@ -703,8 +810,8 @@ class ContriarianTradingSystem:
             print(f"{Fore.RED}❌ Failed to get tick data for {symbol}{Style.RESET_ALL}")
             return False
             
-        # Calculate entry price based on reversed action
-        if reversed_action == "BUY":
+        # Calculate entry price based on action
+        if action == "BUY":
             entry_price = tick.ask
         else:  # SELL
             entry_price = tick.bid
@@ -715,10 +822,61 @@ class ContriarianTradingSystem:
             print(f"{Fore.RED}❌ Failed to calculate ATR for {symbol}{Style.RESET_ALL}")
             return False
             
-        # Calculate enhanced contrarian SL and TP levels
-        levels = self._calculate_contrarian_levels(
-            symbol, reversed_action, entry_price, atr_value, signal_strength
+        # Calculate volume-based SL and TP levels (no reversal needed)
+        levels = self._calculate_volume_based_levels(
+            symbol, action, entry_price, atr_value, signal_strength, volume_score
         )
+        
+        if not levels:
+            print(f"{Fore.RED}❌ Failed to calculate levels for {symbol}{Style.RESET_ALL}")
+            return False
+        
+        # Calculate lot size
+        lot_size = self._calculate_risk_based_lot_size(symbol, entry_price, levels['sl'])
+        
+        # Execute the trade using existing market order method
+        success = self._place_market_order(
+            symbol, action, lot_size,
+            levels['sl'], levels['tp1']
+        )
+        
+        if success:
+            # Record the trade
+            trade_data = {
+                'symbol': symbol,
+                'action': action,
+                'entry_price': entry_price,
+                'lot_size': lot_size,
+                'sl': levels['sl'],
+                'tp1': levels['tp1'],
+                'tp2': levels['tp2'],
+                'tp3': levels['tp3'],
+                'signal_strength': signal_strength,
+                'volume_score': volume_score,
+                'confluences': confluences,
+                'timestamp': datetime.now(),
+                'trade_type': 'volume_based'
+            }
+            
+            self.active_trades[symbol] = trade_data
+            self.daily_trades += 1
+            self.symbol_daily_trades[symbol] = self.symbol_daily_trades.get(symbol, 0) + 1
+            
+            print(f"{Fore.GREEN}✅ Volume-based {action} trade executed for {symbol}{Style.RESET_ALL}")
+            print(f"💰 Entry: {entry_price:.5f} | SL: {levels['sl']:.5f} | TP1: {levels['tp1']:.5f}")
+            print(f"📊 Volume Score: {volume_score:.1f}/10 | Signal: {signal_strength:.1f}/10")
+            
+            # Send notification
+            if self.telegram:
+                self.telegram.send_volume_trade_notification(
+                    symbol, action, entry_price, levels,
+                    signal_strength, volume_score, confluences
+                )
+            
+            return True
+        else:
+            print(f"{Fore.RED}❌ Failed to execute {action} trade for {symbol}{Style.RESET_ALL}")
+            return False
         
         # Calculate dynamic lot size based on $10 risk
         sl_distance_pips = abs(entry_price - levels['sl_price']) * 100000
@@ -782,20 +940,20 @@ class ContriarianTradingSystem:
             return False
             
     def _execute_prioritized_trade(self, symbol, signal_data):
-        """Execute trade for prioritized signal."""
+        """Execute trade for prioritized signal using volume-based approach."""
         signal_type = signal_data.get('signal')
         signal_strength = signal_data.get('strength', 0)
         confluences = signal_data.get('confluences', [])
         
         print(f"🔥 Executing PRIORITY trade: {symbol} - {signal_type} ({signal_strength:.1f}/10)")
         
-        # Execute the contrarian trade
-        success = self._execute_contrarian_trade(symbol, signal_type, signal_strength, confluences)
+        # Execute the volume-based trade (NO REVERSAL)
+        success = self._execute_volume_based_trade(symbol, signal_data)
         
         if success:
             # Send priority notification
             self.telegram.send_priority_trade_notification(
-                symbol, signal_type, signal_strength, "HIGHEST PRIORITY SIGNAL EXECUTED"
+                symbol, signal_type, signal_strength, "HIGH VOLUME SIGNAL EXECUTED"
             )
             
     def _get_atr(self, symbol, period=14):
