@@ -17,7 +17,15 @@ class TradingConfig:
     """Trading Configuration Class - Exact working settings"""
     
     # ===== MT5 CONNECTION SETTINGS =====
-    MT5_LOGIN = int(os.getenv('MT5_LOGIN', '248353032'))
+    @staticmethod
+    def _get_mt5_login():
+        login_str = os.getenv('MT5_LOGIN', '248353032')
+        if login_str.isdigit():
+            return int(login_str)
+        else:
+            return 248353032  # Default value if placeholder used
+    
+    MT5_LOGIN = _get_mt5_login()
     MT5_PASSWORD = os.getenv('MT5_PASSWORD', '23235450Faouzi.')
     MT5_SERVER = os.getenv('MT5_SERVER', 'Exness-MT5Trial')
     
@@ -58,14 +66,15 @@ class TradingConfig:
     
     # ===== PROFESSIONAL RISK MANAGEMENT =====
     
-    # Fixed Dollar Risk System
-    FIXED_RISK_AMOUNT = 5.0         # Fixed $5 risk per trade
-    MAX_DAILY_DRAWDOWN = 70.0       # Maximum $70 daily loss (14 trades * $5)
+    # Fixed Lot Size System
+    FIXED_LOT_SIZE = 0.03           # Fixed 0.03 lot size per trade (=$3 risk)
+    FIXED_RISK_AMOUNT = 3.0         # Fixed $3 risk per trade
+    MAX_DAILY_DRAWDOWN = 70.0       # Maximum $70 daily loss
     
-    # Position Management (CORRECTED for 1 trade per pair per session)
-    MAX_CONCURRENT_TRADES = 2       # Maximum 2 trades at a time (1 per session)
-    MAX_TRADES_PER_DAY = 14         # Maximum 14 trades per day (7 pairs × 2 sessions)
-    MAX_TRADES_PER_PAIR_PER_DAY = 2 # Maximum 2 trades per pair per day (1 per session)
+    # Position Management (Allow 7 concurrent trades)
+    MAX_CONCURRENT_TRADES = 7       # Maximum 7 trades at a time (one per pair)
+    MAX_TRADES_PER_DAY = 14         # Maximum 14 trades per day
+    MAX_TRADES_PER_PAIR_PER_DAY = 2 # Maximum 2 trades per pair per day
     
     # Session-Based Trading Limits (1 trade per pair per session)
     MAX_LONDON_TRADES_PER_PAIR = 1  # 1 trade per pair during London session
@@ -85,9 +94,8 @@ class TradingConfig:
     REVERSAL_RSI_THRESHOLD = 30     # RSI threshold for reversal detection
     REVERSAL_CONFLUENCE_MIN = 3     # Minimum confluences for reversal signal
     
-    # Dynamic Lot Size Calculation (based on $5 risk)
-    # Lot size will be calculated dynamically: Risk Amount / (SL Distance in pips * pip value)
-    BASE_LOT_SIZE = 0.1             # Fallback lot size if calculation fails
+    # Dynamic Lot Size Calculation (Fixed at 0.03 lots)
+    BASE_LOT_SIZE = 0.03            # Fixed lot size: 0.03 per trade
     
     # ===== ENHANCED ATR-BASED TP/SL SYSTEM =====
     ATR_PERIOD = 14                 # ATR calculation period
@@ -170,7 +178,7 @@ class TradingConfig:
         print("=== PROFESSIONAL CONTRARIAN TRADING SYSTEM ===")
         print(f"🎯 Strategy: {'CONTRARIAN (BUY→SELL, SELL→BUY)' if cls.REVERSE_SIGNALS else 'STANDARD'}")
         print(f"📊 Primary Timeframe: {cls.PRIMARY_TIMEFRAME}")
-        print(f"💰 Fixed Risk: ${cls.FIXED_RISK_AMOUNT} per trade")
+        print(f"💰 Fixed Lot Size: {cls.FIXED_LOT_SIZE} lots per trade (=$3 risk)")
         print(f"📈 Take Profit: {cls.TP1_ATR_MULTIPLIER}x, {cls.TP2_ATR_MULTIPLIER}x, {cls.TP3_ATR_MULTIPLIER}x ATR")
         print(f"🛑 Stop Loss: {cls.SL_ATR_MULTIPLIER}x ATR")
         print(f"🎯 Max Concurrent: {cls.MAX_CONCURRENT_TRADES} trades")

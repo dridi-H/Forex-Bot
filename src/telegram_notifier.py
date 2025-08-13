@@ -10,6 +10,21 @@ import requests
 from datetime import datetime
 from colorama import Fore, Style
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # Fallback: manually load .env file if python-dotenv not available
+    try:
+        with open('.env', 'r', encoding='utf-8') as f:
+            for line in f:
+                if '=' in line and not line.strip().startswith('#'):
+                    key, value = line.strip().split('=', 1)
+                    os.environ[key] = value
+    except FileNotFoundError:
+        pass
+
 
 class TelegramNotifier:
     """

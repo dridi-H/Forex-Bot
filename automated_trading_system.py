@@ -3,7 +3,7 @@
 Contrarian Automated Trading System
 
 A soph        print(f"🛡️ Min Signal Strength: {self.config.MIN_SIGNAL_STRENGTH}/10 (PREMIUM ONLY)")
-        print(f"💰 Fixed Risk: ${self.config.FIXED_RISK_AMOUNT} per trade")
+        print(f"💰 Fixed Lot Size: {self.config.FIXED_LOT_SIZE} lots per trade (=$3 risk)")
         print(f"🚫 Max Daily Drawdown: ${self.config.MAX_DAILY_DRAWDOWN}")
         print(f"🎯 Daily Profit Target: ${self.config.DAILY_PROFIT_TARGET}")
         print(f"🎯 Max Concurrent Trades: {self.config.MAX_CONCURRENT_TRADES}")
@@ -79,6 +79,7 @@ class ContriarianTradingSystem:
         self.active_trades = {}  # Track active trades for monitoring
         self.daily_pnl = 0.0    # Track daily profit/loss in USD
         self.daily_trades_count = 0  # Track number of trades today
+        self.symbol_daily_trades = {}  # Track daily trades per symbol
         self.running = False
         self.last_check_time = datetime.now()
         self.signal_queue = []  # Queue for signal prioritization (professional risk management)
@@ -155,6 +156,7 @@ class ContriarianTradingSystem:
             self.session_trades = {'london': {}, 'ny': {}}
             self.successful_pairs = set()
             self.trades_today.clear()
+            self.symbol_daily_trades.clear()
             
             print("✅ Daily counters reset:")
             print(f"   � Daily trades: {self.daily_trades_count}")
@@ -455,59 +457,26 @@ class ContriarianTradingSystem:
         
     def _calculate_lot_size(self, symbol, sl_distance_pips):
         """
-        Calculate lot size based on fixed $10 risk.
+        Use fixed lot size of 0.03 per trade (=$3 risk).
         
         Args:
             symbol (str): Trading symbol
             sl_distance_pips (float): Stop loss distance in pips
             
         Returns:
-            float: Calculated lot size
+            float: Fixed lot size of 0.03
         """
         try:
-            # Get symbol info for pip value calculation
-            import MetaTrader5 as mt5
-            symbol_info = mt5.symbol_info(symbol)
+            # Use fixed lot size from config
+            fixed_lot_size = self.config.FIXED_LOT_SIZE
             
-            if not symbol_info:
-                print(f"⚠️ Could not get symbol info for {symbol}, using base lot size")
-                return self.config.BASE_LOT_SIZE
+            print(f"💰 Fixed Lot Size: {fixed_lot_size} lots (=$3 risk per trade)")
             
-            # Calculate pip value for 1 standard lot
-            if symbol.endswith(('JPY', 'jpy')):
-                pip_size = 0.01  # JPY pairs have 2 decimal pip
-            else:
-                pip_size = 0.0001  # Most pairs have 4 decimal pip
-                
-            # For mini lots (0.1), pip value is usually $1 per pip for USD account
-            pip_value_per_mini_lot = 1.0  # $1 per pip for 0.1 lot on EURUSD
-            
-            # Adjust pip value for different symbols
-            if 'USD' not in symbol:
-                # For non-USD pairs, use approximate conversion
-                pip_value_per_mini_lot = 1.0  # Simplified for now
-            
-            # Calculate required lot size: Risk Amount / (SL Distance * Pip Value per lot)
-            required_lots = self.config.FIXED_RISK_AMOUNT / (sl_distance_pips * pip_value_per_mini_lot)
-            
-            # Round to acceptable lot size increments (0.01 minimum)
-            required_lots = round(required_lots, 2)
-            
-            # Ensure minimum lot size
-            if required_lots < 0.01:
-                required_lots = 0.01
-            
-            # Ensure maximum reasonable lot size (safety limit)
-            if required_lots > 1.0:
-                required_lots = 1.0
-                
-            print(f"💰 Risk Calculation: ${self.config.FIXED_RISK_AMOUNT} ÷ ({sl_distance_pips:.1f} pips × ${pip_value_per_mini_lot}) = {required_lots:.2f} lots")
-            
-            return required_lots
+            return fixed_lot_size
             
         except Exception as e:
-            print(f"❌ Error calculating lot size: {e}")
-            return self.config.BASE_LOT_SIZE
+            print(f"❌ Error with lot size: {e}")
+            return 0.03  # Fallback to 0.03
             
     def _get_strength_multiplier(self, signal_strength):
         """Get multiplier based on signal strength."""
@@ -763,6 +732,12 @@ class ContriarianTradingSystem:
             symbol (str): Trading symbol
             signal_data (dict): Signal data with volume analysis
         """
+        # CHECK: Only one trade per pair allowed
+        if symbol in self.active_trades:
+            print(f"{Fore.YELLOW}⚠️ {symbol}: Already have active trade - SKIPPING new entry{Style.RESET_ALL}")
+            print(f"💡 Only one trade per pair allowed for risk management")
+            return False
+            
         original_signal = signal_data['signal']
         signal_strength = signal_data['strength']
         confluences = signal_data['confluences']
@@ -781,8 +756,8 @@ class ContriarianTradingSystem:
             print(f"💡 Waiting for volume score ≥ 8.0 for high-confidence trades")
             return False
         
-        # High volume confirmed - use signal AS IS (no reversal)
-        action = original_signal  # Direct execution, no reversal!
+        # High volume confirmed - REVERSE the signal for contrarian trading
+        action = "SELL" if original_signal == "BUY" else "BUY"  # SIGNAL REVERSAL!
         
         print(f"\n{Fore.CYAN}� HIGH VOLUME SIGNAL CONFIRMED{Style.RESET_ALL}")
         print(f"📊 Symbol: {symbol}")
@@ -832,7 +807,8 @@ class ContriarianTradingSystem:
             return False
         
         # Calculate lot size
-        lot_size = self._calculate_risk_based_lot_size(symbol, entry_price, levels['sl'])
+        sl_distance_pips = abs(entry_price - levels['sl']) * 10000 if 'JPY' not in symbol else abs(entry_price - levels['sl']) * 100
+        lot_size = self._calculate_lot_size(symbol, sl_distance_pips)
         
         # Execute the trade using existing market order method
         success = self._place_market_order(
@@ -859,7 +835,7 @@ class ContriarianTradingSystem:
             }
             
             self.active_trades[symbol] = trade_data
-            self.daily_trades += 1
+            self.daily_trades_count += 1
             self.symbol_daily_trades[symbol] = self.symbol_daily_trades.get(symbol, 0) + 1
             
             print(f"{Fore.GREEN}✅ Volume-based {action} trade executed for {symbol}{Style.RESET_ALL}")
